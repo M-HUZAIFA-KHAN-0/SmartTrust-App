@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 class AppFonts {
   AppFonts._();
 
-  // Font Family
-  static const String fontFamily = 'Poppins';
-
   // Font Sizes
   static const double xs = 10.0;
   static const double sm = 12.0;
