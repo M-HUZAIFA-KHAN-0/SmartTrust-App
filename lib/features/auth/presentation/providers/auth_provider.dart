@@ -1,79 +1,140 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/storage/secure_storage_service.dart';
 import '../../data/repositories/auth_repository_impl.dart';
+import '../../domain/entities/auth_entities.dart';
 import '../../domain/entities/user_entity.dart';
 import '../../domain/repositories/auth_repository.dart';
 
-final authStateProvider =
-    AsyncNotifierProvider<AuthStateNotifier, UserEntity?>(
-  () => AuthStateNotifier(),
+final authStateProvider = AsyncNotifierProvider<AuthStateNotifier, UserEntity?>(
+  AuthStateNotifier.new,
 );
+final signupRoleProvider = StateProvider<String?>((ref) => null);
+final pendingRegistrationProvider = StateProvider<PendingRegistration?>(
+  (ref) => null,
+);
+final forgotPasswordPhoneProvider = StateProvider<String?>((ref) => null);
 
 class AuthStateNotifier extends AsyncNotifier<UserEntity?> {
-  late final AuthRepository _authRepository;
-
+  late final AuthRepository repo;
   @override
   Future<UserEntity?> build() async {
-    _authRepository = ref.watch(authRepositoryProvider);
-
-    return null;
+    repo = ref.watch(authRepositoryProvider);
+    final t = await ref.read(secureStorageServiceProvider).getAccessToken();
+    if (t == null || t.isEmpty) return null;
+    final p = await SharedPreferences.getInstance();
+    return UserEntity(
+      id: p.getString('user_id') ?? '1',
+      name: p.getString('user_name') ?? 'User',
+      email: p.getString('user_email') ?? '',
+      phone: p.getString('user_phone') ?? '',
+      role: p.getString('user_role') ?? '',
+      status: p.getString('user_status') ?? '',
+    );
   }
 
-  Future<void> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> login({required String phone, required String password}) async {
     state = const AsyncValue.loading();
-
-    final result = await _authRepository.login(
-      email: email,
-      password: password,
-    );
-
-    state = await result.when(
-      success: (user) {
-        return AsyncValue<UserEntity?>.data(user);
-      },
-      failure: (failure) {
-        return AsyncValue<UserEntity?>.error(
-          failure,
-          StackTrace.current,
-        );
-      },
+    state = await (await repo.login(phone: phone, password: password)).when(
+      success: (u) => AsyncValue.data(u),
+      failure: (f) => AsyncValue.error(f, StackTrace.current),
     );
   }
 
-  Future<void> signup({
-    required String name,
+  Future<RegisterInitEntity?> registerInit({
+    required String phone,
     required String email,
     required String password,
     required String role,
+    required String fullName,
   }) async {
-    state = const AsyncValue.loading();
-
-    final result = await _authRepository.signup(
-      name: name,
+    final backend = role.toLowerCase() == 'provider'
+        ? 'SERVICE_PROVIDER'
+        : 'CUSTOMER';
+    final r = await repo.registerInit(
+      phone: phone,
       email: email,
       password: password,
-      role: role,
+      role: backend,
+      fullName: fullName,
     );
-
-    state = await result.when(
-      success: (user) {
-        return AsyncValue<UserEntity?>.data(user);
+    return r.when(
+      success: (v) => v,
+      failure: (f) {
+        state = AsyncValue.error(f, StackTrace.current);
+        return null;
       },
-      failure: (failure) {
-        return AsyncValue<UserEntity?>.error(
-          failure,
-          StackTrace.current,
-        );
+    );
+  }
+
+  Future<bool> resendOtp(String phone) async {
+    final r = await repo.resendOtp(phone: phone);
+    return r.when(
+      success: (_) => true,
+      failure: (f) {
+        state = AsyncValue.error(f, StackTrace.current);
+        return false;
+      },
+    );
+  }
+
+  Future<void> verifyOtp({required String phone, required String otp}) async {
+    state = const AsyncValue.loading();
+    state = await (await repo.verifyOtp(phone: phone, otp: otp)).when(
+      success: (u) => AsyncValue.data(u),
+      failure: (f) => AsyncValue.error(f, StackTrace.current),
+    );
+  }
+
+  Future<void> selectRole(String role) async {
+    state = const AsyncValue.loading();
+    final backend = role.toLowerCase() == 'provider'
+        ? 'SERVICE_PROVIDER'
+        : 'CUSTOMER';
+    state = await (await repo.selectRole(role: backend)).when(
+      success: (u) => AsyncValue.data(u),
+      failure: (f) => AsyncValue.error(f, StackTrace.current),
+    );
+  }
+
+  Future<bool> forgotPasswordInit({required String phone}) async {
+    final r = await repo.forgotPasswordInit(phone: phone);
+    return r.when(
+      success: (_) {
+        state = const AsyncValue.data(null);
+        return true;
+      },
+      failure: (f) {
+        state = AsyncValue.error(f, StackTrace.current);
+        return false;
+      },
+    );
+  }
+
+  Future<bool> forgotPasswordReset({
+    required String phone,
+    required String otp,
+    required String newPassword,
+  }) async {
+    final r = await repo.forgotPasswordReset(
+      phone: phone,
+      otp: otp,
+      newPassword: newPassword,
+    );
+    return r.when(
+      success: (_) {
+        state = const AsyncValue.data(null);
+        return true;
+      },
+      failure: (f) {
+        state = AsyncValue.error(f, StackTrace.current);
+        return false;
       },
     );
   }
 
   Future<void> logout() async {
-    await _authRepository.logout();
-
-    state = const AsyncValue<UserEntity?>.data(null);
+    await repo.logout();
+    state = const AsyncValue.data(null);
   }
 }
